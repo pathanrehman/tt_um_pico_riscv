@@ -1,5 +1,3 @@
-Here's the complete documentation for PicoRISC-V:
-
 # PicoRISC-V Educational Core
 
 ## How it works

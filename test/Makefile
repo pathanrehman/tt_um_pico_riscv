@@ -4,8 +4,9 @@
 # defaults
 SIM ?= icarus
 TOPLEVEL_LANG ?= verilog
+
 SRC_DIR = $(PWD)/../src
-PROJECT_SOURCES = project.v
+PROJECT_SOURCES = tt_um_pico_riscv.v
 
 ifneq ($(GATES),yes)
 
@@ -35,10 +36,18 @@ COMPILE_ARGS 		+= -I$(SRC_DIR)
 
 # Include the testbench sources:
 VERILOG_SOURCES += $(PWD)/tb.v
+
 TOPLEVEL = tb
 
 # MODULE is the basename of the Python test file
 MODULE = test
+
+# Enable waveform generation for debugging PicoRISC-V
+WAVES ?= 1
+
+# Set simulation timeout for educational testing
+COCOTB_SIM_TIME = 10ms
+COCOTB_TIME_PRECISION = 1ns
 
 # include cocotb's make rules to take care of the simulator setup
 include $(shell cocotb-config --makefiles)/Makefile.sim

@@ -45,6 +45,8 @@ module tb ();
       .rst_n  (rst_n)     // not reset
   );
 
+  // Debug signals only available in RTL simulation
+`ifndef GL_TEST
   // Additional debug signals for PicoRISC-V educational visibility
   wire [15:0] current_instruction = user_project.instruction_reg;
   wire [7:0] register_0 = user_project.registers[0];
@@ -59,5 +61,8 @@ module tb ();
   wire instruction_valid = user_project.instruction_valid;
   wire branch_taken = user_project.branch_taken;
   wire [7:0] alu_result = user_project.alu_result;
+  wire load_state = user_project.load_state;
+  wire [2:0] current_rd = user_project.current_rd;
+`endif
   
 endmodule

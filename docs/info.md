@@ -1,3 +1,5 @@
+Here's the complete documentation for PicoRISC-V:
+
 # PicoRISC-V Educational Core
 
 ## How it works
@@ -21,10 +23,10 @@ PicoRISC-V is a minimal 8-bit RISC-V processor core designed specifically for ed
 - **B-Type**: Branch operations (BEQ, BNE, BLT, BGE)
 
 ### Instruction Format (16-bit)
-
+```
 [15:13] [12:8] [10:8] [7:5] [4:2] [1:0]
 funct3   imm    rs2    rs1   rd   opcode
-
+```
 
 ### Educational Benefits
 
@@ -63,28 +65,28 @@ PicoRISC-V uses a simple 2-cycle instruction loading protocol:
 ### Example Test Sequence
 
 **Load Immediate**: Load value 5 into register R1
-
+```
 Instruction: 0x0285 (LI R1, #5)
 Cycle 1: ui = 0x85, uio = don't care
 Cycle 2: ui = 0x82, uio = 0x02
 Cycle 3: ui = 0x02, uio = don't care (execute)
 Result: uo_out shows 0x05, uio_out shows R1 address
-
+```
 
 **Add Operation**: Add R1 + R1, store in R2
-
+```
 Instruction: 0x0089 (ADD R2, R1, R1)  
 Cycle 1: ui = 0x89, uio = don't care
 Cycle 2: ui = 0x80, uio = 0x00
 Cycle 3: ui = 0x00, uio = don't care (execute)
 Result: uo_out shows 0x0A (10), uio_out shows R2 address
-
+```
 
 **Branch Test**: Branch if R1 equals R2
-
+```
 Instruction: 0x008B (BEQ R1, R2, offset)
 Result: Branch taken = 0 (since 5 ≠ 10), PC increments normally
-
+```
 
 ### Monitoring Outputs
 
@@ -120,7 +122,3 @@ Result: Branch taken = 0 (since 5 ≠ 10), PC increments normally
 - **Breadboard Setup**: Wire up manual instruction entry system with switches and displays
 
 The core is specifically designed to work with minimal external components, making it ideal for educational environments where students can manually input instructions and immediately observe the results, fostering a deep understanding of processor fundamentals.
-
-[9](https://yeokhengmeng.com/2024/06/my-first-chip-with-tiny-tapeout-cvx/)
-[10](https://www.reddit.com/r/RISCV/comments/1gr8h15/advice_needed_for_choosing_a_small_riscv_cpu_with/)
-[11](https://github.com/MichaelBell/tinyQV/)

@@ -1,63 +1,65 @@
 # SPDX-FileCopyrightText: © 2024 Tiny Tapeout
 # SPDX-License-Identifier: Apache-2.0
+
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles
 
-# ADDITION PROGRAM ENCODING:
-# 0: LOAD ui_in -> x1      (opcode=2, rd=1, rs2=0)  = 0b10_001_000 = 0x48
-# 1: LOAD uio_in -> x2     (opcode=2, rd=2, rs2=1)  = 0b10_010_001 = 0x91
-# 2: ADD x1, x2 -> x3      (opcode=0, rd=3, rs2=2)  = 0b00_011_010 = 0x1A
-# 3: STORE x3 to out       (opcode=3, rd=3, rs2=0)  = 0b11_011_000 = 0xD8
-# 4: HALT                  (opcode=3, rd=7, rs2=7)  = 0b11_111_111 = 0xFF
+# Program: (Add ui_in + uio_in and output, then halt)
+# 0x88: LOAD ui_in  -> x1
+# 0x91: LOAD uio_in -> x2
+# 0x1A: ADD x1, x2 -> x3
+# 0xD8: STORE x3
+# 0xFF: HALT
 
-program = [0x48, 0x91, 0x1A, 0xD8, 0xFF] + [0x00]*11  # Fill 16 instruction slots
+program = [
+    0x88,  # 10001000: LOAD ui_in into x1
+    0x91,  # 10010001: LOAD uio_in into x2
+    0x1A,  # 00011010: ADD x1 and x2 -> x3
+    0xD8,  # 11011000: STORE x3 to output
+    0xFF,  # 11111111: HALT
+] + [0x00]*11
 
 async def load_program(dut, prog):
-    """Write the user program into instruction memory via uio_in."""
+    """Write the user program (prog) to the instruction memory."""
     for addr, code in enumerate(prog):
-        # Set write enable (bit 7), address (bits 6:3), data (bits 2:0 of code)
-        uio_val = (1<<7) | ((addr & 0xF) << 3) | ((code >> 4) & 0x07)
-        dut.uio_in.value = uio_val
+        # High bit is write-enable, next 4 address, next 8 data
+        loader_word = (1 << 7) | (addr << 3) | (code & 0xFF)
+        dut.uio_in.value = loader_word
         await ClockCycles(dut.clk, 1)
-        # Now set lower bits and keep write enable
-        uio_val = (1<<7) | ((addr & 0xF) << 3) | (code & 0x07)
-        dut.uio_in.value = uio_val
-        await ClockCycles(dut.clk, 1)
-    # Clear write enable to allow CPU execution
+    # Disable program-write after loading
     dut.uio_in.value = 0
     await ClockCycles(dut.clk, 1)
 
 @cocotb.test()
 async def test_addition_program(dut):
-    dut._log.info("Start test_addition_program")
-
-    # Setup clock
+    """Test loading a program and performing addition."""
     clock = Clock(dut.clk, 10, units="us")
     cocotb.start_soon(clock.start())
 
-    # Reset
+    # Reset and clear everything
     dut.ena.value = 1
+    dut.rst_n.value = 0
     dut.ui_in.value = 0
     dut.uio_in.value = 0
-    dut.rst_n.value = 0
     await ClockCycles(dut.clk, 5)
     dut.rst_n.value = 1
+    await ClockCycles(dut.clk, 2)
 
-    # Upload addition-only program
+    # Load program
     await load_program(dut, program)
-    dut._log.info("Addition program uploaded")
 
-    # Test addition of 15 + 7
+    # Set input operands for addition (e.g., 15+7=22)
     dut.ui_in.value = 15
     dut.uio_in.value = 7
 
-    # Wait for the CPU to execute (program length + margin)
+    # Give some time for CPU to execute
     await ClockCycles(dut.clk, 20)
 
     result = int(dut.uo_out.value)
     cpu_state = int(dut.uio_out.value) & 0x7
     dut._log.info(f"Addition Result: {result} (expected 22), CPU State: {cpu_state}")
+
     assert result == 22, f"Expected 22, got {result}"
     assert cpu_state == 4, f"Expected HALT state (4), got {cpu_state}"
 

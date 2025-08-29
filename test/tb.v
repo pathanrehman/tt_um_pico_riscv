@@ -5,6 +5,7 @@
    that can be driven / tested by the cocotb test.py.
 */
 module tb ();
+
   // Dump the signals to a VCD file. You can view it with gtkwave or surfer.
   initial begin
     $dumpfile("tb.vcd");
@@ -28,7 +29,7 @@ module tb ();
 `endif
 
   // Replace tt_um_example with your module name:
-  tt_um_pico_riscv user_project (
+  tt_um_tiny_riscv user_project (
       // Include power ports for the Gate Level test:
 `ifdef GL_TEST
       .VPWR(VPWR),

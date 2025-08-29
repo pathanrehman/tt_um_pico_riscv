@@ -1,56 +1,51 @@
 # Tiny Tapeout project information
 project:
-  title:        ""      # Project title
-  author:       ""      # Your name
+  title:        "PicoRISC-V Educational Core"      # Project title
+  author:       "Your Name"      # Your name
   discord:      ""      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
-  description:  ""      # One line description of what your project does
+  description:  "Minimal 8-bit RISC-V core for educational purposes with 16-bit compressed instructions"      # One line description of what your project does
   language:     "Verilog" # other examples include SystemVerilog, Amaranth, VHDL, etc
-  clock_hz:     0       # Clock frequency in Hz (or 0 if not applicable)
-
+  clock_hz:     10000000       # Clock frequency in Hz (10 MHz - suitable for educational use)
   # How many tiles your design occupies? A single tile is about 167x108 uM.
   tiles: "1x1"          # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 6x2 or 8x2
-
   # Your top module name must start with "tt_um_". Make it unique by including your github username:
-  top_module:  "tt_um_example"
-
+  top_module:  "tt_um_pico_riscv"
   # List your project's source files here.
   # Source files must be in ./src and you must list each source file separately, one per line.
   # Don't forget to also update `PROJECT_SOURCES` in test/Makefile.
   source_files:
-    - "project.v"
+    - "tt_um_pico_riscv.v"
 
 # The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.
 # This section is for the datasheet/website. Use descriptive names (e.g., RX, TX, MOSI, SCL, SEG_A, etc.).
 pinout:
   # Inputs
-  ui[0]: ""
-  ui[1]: ""
-  ui[2]: ""
-  ui[3]: ""
-  ui[4]: ""
-  ui[5]: ""
-  ui[6]: ""
-  ui[7]: ""
-
+  ui[0]: "INST_DATA[0]"
+  ui[1]: "INST_DATA[1]"
+  ui[2]: "INST_DATA[2]"
+  ui[3]: "INST_DATA[3]"
+  ui[4]: "INST_DATA[4]"
+  ui[5]: "INST_DATA[5]"
+  ui[6]: "INST_DATA[6]"
+  ui[7]: "LOAD_EN"
   # Outputs
-  uo[0]: ""
-  uo[1]: ""
-  uo[2]: ""
-  uo[3]: ""
-  uo[4]: ""
-  uo[5]: ""
-  uo[6]: ""
-  uo[7]: ""
-
+  uo[0]: "REG_OUT[0]"
+  uo[1]: "REG_OUT[1]"
+  uo[2]: "REG_OUT[2]"
+  uo[3]: "REG_OUT[3]"
+  uo[4]: "REG_OUT[4]"
+  uo[5]: "REG_OUT[5]"
+  uo[6]: "REG_OUT[6]"
+  uo[7]: "REG_OUT[7]"
   # Bidirectional pins
-  uio[0]: ""
-  uio[1]: ""
-  uio[2]: ""
-  uio[3]: ""
-  uio[4]: ""
-  uio[5]: ""
-  uio[6]: ""
-  uio[7]: ""
+  uio[0]: "DBG_REG[0]"
+  uio[1]: "DBG_REG[1]"
+  uio[2]: "DBG_REG[2]"
+  uio[3]: "DBG_PC[0]"
+  uio[4]: "DBG_PC[1]"
+  uio[5]: "DBG_PC[2]"
+  uio[6]: "DBG_PC[3]"
+  uio[7]: "DBG_PC[4]"
 
 # Do not change!
 yaml_version: 6

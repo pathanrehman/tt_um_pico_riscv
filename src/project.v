@@ -6,7 +6,7 @@
 module tt_um_tiny_riscv (
     input  wire [7:0] ui_in,    // Dedicated inputs (user data in)
     output wire [7:0] uo_out,   // Dedicated outputs (user data out)
-    input  wire [7:0] uio_in,   // User IOs: [7]=program_write_enable, [6:4]=program_write_addr, [3:0]=program_write_data
+    input  wire [7:0] uio_in,   // User IOs: program interface
     output wire [7:0] uio_out,  // User IOs: output/debug
     output wire [7:0] uio_oe,   // IOs: output enable
     input  wire       ena,      // always 1 when design powered
@@ -27,10 +27,13 @@ module tt_um_tiny_riscv (
     // Writable instruction memory (RAM)
     reg [DATA_WIDTH-1:0] inst_mem [0:15];
 
+    // Declare loop variable at module level (fixes synthesis error)
+    integer i;
+
     // Program loader signals mapped from uio_in
     wire program_write_enable = uio_in[7];
     wire [3:0] program_write_addr = uio_in[6:3];
-    wire [7:0] program_write_data = {uio_in[3:0], 4'b0000}; // Lower 4 bits padded, change as needed
+    wire [7:0] program_write_data = {uio_in[3:0], 4'b0000}; // Lower 4 bits padded, change if needed
 
     // Instruction fields (8-bit simplified format)
     wire [1:0] opcode = instruction[7:6];
@@ -38,7 +41,7 @@ module tt_um_tiny_riscv (
     wire [2:0] rs2    = instruction[2:0];
     wire [2:0] imm3   = instruction[2:0];
 
-    // Opcode definitions/ALU function codes
+    // Opcode definitions
     parameter OP_ALU_REG = 2'b00, OP_ALU_IMM = 2'b01, OP_LOAD = 2'b10, OP_STORE = 2'b11;
     parameter ALU_ADD = 3'b000, ALU_SUB = 3'b001, ALU_AND = 3'b010, ALU_OR  = 3'b011;
     parameter ALU_XOR = 3'b100, ALU_SLL = 3'b101, ALU_SRL = 3'b110, ALU_MUL = 3'b111;
@@ -65,15 +68,16 @@ module tt_um_tiny_riscv (
     // Output register for results
     reg [DATA_WIDTH-1:0] output_reg;
 
-    // Main logic: adds a program loading phase before FETCH
+    // Main logic - includes program loading support
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             pc <= 4'h0;
             state <= FETCH;
             output_reg <= 8'h00;
-            integer i;
-            for (i = 0; i < 8; i = i+1)
+            for (i = 0; i < 8; i = i + 1)
                 reg_file[i] <= 8'h00;
+            for (i = 0; i < 16; i = i + 1)
+                inst_mem[i] <= 8'h00;
         end else begin
             if (program_write_enable) begin
                 inst_mem[program_write_addr] <= program_write_data;
@@ -128,18 +132,13 @@ module tt_um_tiny_riscv (
                         endcase
                     end
                     WRITEBACK: begin
-                        if (rd != 3'b000) begin
+                        if (rd != 3'b000)
                             reg_file[rd] <= alu_result;
-                        end
                         pc <= pc + 1;
                         state <= FETCH;
                     end
-                    HALT: begin
-                        state <= HALT;
-                    end
-                    default: begin
-                        state <= FETCH;
-                    end
+                    HALT: state <= HALT;
+                    default: state <= FETCH;
                 endcase
             end
         end

@@ -21,13 +21,13 @@ module tt_um_pico_riscv (
     localparam LOAD = 2'b01;
     localparam EXECUTE = 2'b10;
     reg [1:0] state;
+    reg [1:0] reset_count; // Reset hold-off counter
 
     // Instruction register - 16 bits total
     reg [15:0] instruction_reg;
     reg [15:0] instruction_exec; // Execution stage
     reg [2:0]  current_rd;       // Current destination register
     reg [2:0]  current_rd_delayed; // Delayed for output
-    reg        instruction_valid;
 
     // 8 x 8-bit register file
     reg [7:0] registers [0:7];
@@ -57,86 +57,88 @@ module tt_um_pico_riscv (
                 registers[i] <= 8'b0;
             instruction_reg <= 16'b0;
             instruction_exec <= 16'b0;
-            instruction_valid <= 1'b0;
             current_rd <= 3'b0;
             current_rd_delayed <= 3'b0;
             pc <= 8'b0;
             branch_taken <= 1'b0;
             state <= IDLE;
+            reset_count <= 2'b11; // Hold-off for 3 cycles
         end else begin
-            case (state)
-                IDLE: begin
-                    instruction_valid <= 1'b0;
-                    if (ui_in[7] && ena) begin // Load enable
-                        instruction_reg <= {uio_in[7:0], ui_in[6:0]};
-                        state <= LOAD;
+            // Reset hold-off
+            if (reset_count != 0) begin
+                reset_count <= reset_count - 1;
+                state <= IDLE;
+            end else begin
+                case (state)
+                    IDLE: begin
+                        if (ui_in[7] && ena) begin // Load enable
+                            instruction_reg <= {uio_in[7:0], ui_in[6:0]};
+                            state <= LOAD;
+                        end
                     end
-                end
-                LOAD: begin
-                    instruction_exec <= instruction_reg;
-                    instruction_valid <= 1'b1;
-                    state <= EXECUTE;
-                end
-                EXECUTE: begin
-                    instruction_valid <= 1'b0;
-                    current_rd <= rd;
-                    current_rd_delayed <= current_rd; // Update delayed rd
-                    state <= IDLE;
+                    LOAD: begin
+                        instruction_exec <= instruction_reg;
+                        state <= EXECUTE;
+                    end
+                    EXECUTE: begin
+                        // ALU operation
+                        case (funct3)
+                            3'b000: alu_result = operand_a + operand_b;      // ADD
+                            3'b001: alu_result = operand_a - operand_b;      // SUB  
+                            3'b010: alu_result = operand_a & operand_b;      // AND
+                            3'b011: alu_result = operand_a | operand_b;      // OR
+                            3'b100: alu_result = operand_a ^ operand_b;      // XOR
+                            3'b101: alu_result = operand_a << operand_b[2:0]; // SLL
+                            3'b110: alu_result = operand_a >> operand_b[2:0]; // SRL
+                            3'b111: alu_result = (operand_a < operand_b) ? 8'b1 : 8'b0; // SLT
+                            default: alu_result = 8'b0;
+                        endcase
 
-                    // ALU operation
-                    case (funct3)
-                        3'b000: alu_result = operand_a + operand_b;      // ADD
-                        3'b001: alu_result = operand_a - operand_b;      // SUB  
-                        3'b010: alu_result = operand_a & operand_b;      // AND
-                        3'b011: alu_result = operand_a | operand_b;      // OR
-                        3'b100: alu_result = operand_a ^ operand_b;      // XOR
-                        3'b101: alu_result = operand_a << operand_b[2:0]; // SLL
-                        3'b110: alu_result = operand_a >> operand_b[2:0]; // SRL
-                        3'b111: alu_result = (operand_a < operand_b) ? 8'b1 : 8'b0; // SLT
-                        default: alu_result = 8'b0;
-                    endcase
-
-                    // Decoder
-                    case (opcode)
-                        2'b00: begin // R-type
-                            if (rd != 3'b000)
-                                registers[rd] <= alu_result;
-                            branch_taken <= 1'b0;
-                            pc <= pc + 1'b1;
-                        end
-                        2'b01: begin // I-type
-                            case (funct3)
-                                3'b000: if (rd != 3'b000) registers[rd] <= operand_a + imm_extended; // ADDI
-                                3'b010: if (rd != 3'b000) registers[rd] <= (operand_a < imm_extended) ? 8'b1 : 8'b0; // SLTI
-                                3'b011: if (rd != 3'b000) registers[rd] <= operand_a & imm_extended; // ANDI
-                                3'b100: if (rd != 3'b000) registers[rd] <= operand_a | imm_extended; // ORI
-                                default: if (rd != 3'b000) registers[rd] <= imm_extended; // Load Immediate
-                            endcase
-                            branch_taken <= 1'b0;
-                            pc <= pc + 1'b1;
-                        end
-                        2'b10: begin // S-type (Store)
-                            branch_taken <= 1'b0;
-                            pc <= pc + 1'b1;
-                        end
-                        2'b11: begin // B-type (Branch)
-                            case (funct3[1:0])
-                                2'b00: branch_taken <= (operand_a == operand_b);
-                                2'b01: branch_taken <= (operand_a != operand_b);
-                                2'b10: branch_taken <= (operand_a < operand_b);
-                                2'b11: branch_taken <= (operand_a >= operand_b);
-                            endcase
-                            if (branch_taken) pc <= pc + imm_extended;
-                            else pc <= pc + 1'b1;
-                        end
-                        default: begin
-                            branch_taken <= 1'b0;
-                            pc <= pc + 1'b1;
-                        end
-                    endcase
-                end
-                default: state <= IDLE;
-            endcase
+                        // Decoder
+                        case (opcode)
+                            2'b00: begin // R-type
+                                if (rd != 3'b000)
+                                    registers[rd] <= alu_result;
+                                branch_taken <= 1'b0;
+                                pc <= pc + 1'b1;
+                            end
+                            2'b01: begin // I-type
+                                case (funct3)
+                                    3'b000: if (rd != 3'b000) registers[rd] <= operand_a + imm_extended; // ADDI
+                                    3'b010: if (rd != 3'b000) registers[rd] <= (operand_a < imm_extended) ? 8'b1 : 8'b0; // SLTI
+                                    3'b011: if (rd != 3'b000) registers[rd] <= operand_a & imm_extended; // ANDI
+                                    3'b100: if (rd != 3'b000) registers[rd] <= operand_a | imm_extended; // ORI
+                                    default: if (rd != 3'b000) registers[rd] <= imm_extended; // Load Immediate
+                                endcase
+                                branch_taken <= 1'b0;
+                                pc <= pc + 1'b1;
+                            end
+                            2'b10: begin // S-type (Store)
+                                branch_taken <= 1'b0;
+                                pc <= pc + 1'b1;
+                            end
+                            2'b11: begin // B-type (Branch)
+                                case (funct3[1:0])
+                                    2'b00: branch_taken <= (operand_a == operand_b);
+                                    2'b01: branch_taken <= (operand_a != operand_b);
+                                    2'b10: branch_taken <= (operand_a < operand_b);
+                                    2'b11: branch_taken <= (operand_a >= operand_b);
+                                endcase
+                                if (branch_taken) pc <= pc + imm_extended;
+                                else pc <= pc + 1'b1;
+                            end
+                            default: begin
+                                branch_taken <= 1'b0;
+                                pc <= pc + 1'b1;
+                            end
+                        endcase
+                        current_rd <= rd;
+                        current_rd_delayed <= rd; // Update in EXECUTE
+                        state <= IDLE;
+                    end
+                    default: state <= IDLE;
+                endcase
+            end
         end
     end
 

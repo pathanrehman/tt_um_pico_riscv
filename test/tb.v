@@ -5,7 +5,6 @@
    that can be driven / tested by the cocotb test.py.
 */
 module tb ();
-
   // Dump the signals to a VCD file. You can view it with gtkwave or surfer.
   initial begin
     $dumpfile("tb.vcd");
@@ -45,24 +44,4 @@ module tb ();
       .rst_n  (rst_n)     // not reset
   );
 
-  // Debug signals only available in RTL simulation
-`ifndef GL_TEST
-  // Additional debug signals for PicoRISC-V educational visibility
-  wire [15:0] current_instruction = user_project.instruction_reg;
-  wire [7:0] register_0 = user_project.registers[0];
-  wire [7:0] register_1 = user_project.registers[1];
-  wire [7:0] register_2 = user_project.registers[2];
-  wire [7:0] register_3 = user_project.registers[3];
-  wire [7:0] register_4 = user_project.registers[4];
-  wire [7:0] register_5 = user_project.registers[5];
-  wire [7:0] register_6 = user_project.registers[6];
-  wire [7:0] register_7 = user_project.registers[7];
-  wire [7:0] program_counter = user_project.pc;
-  wire instruction_valid = user_project.instruction_valid;
-  wire branch_taken = user_project.branch_taken;
-  wire [7:0] alu_result = user_project.alu_result;
-  wire load_state = user_project.load_state;
-  wire [2:0] current_rd = user_project.current_rd;
-`endif
-  
 endmodule

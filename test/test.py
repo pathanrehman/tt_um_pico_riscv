@@ -1,33 +1,31 @@
 # SPDX-FileCopyrightText: © 2024 Tiny Tapeout
 # SPDX-License-Identifier: Apache-2.0
+
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles, RisingEdge
 
 async def load_instruction(dut, lower_byte, upper_byte):
-    # Load lower byte with load enable
-    dut.ui_in.value = 0x80 | (lower_byte & 0x7F)
+    # Load full 16-bit instruction in one cycle
+    dut.ui_in.value = 0x80 | (lower_byte & 0x7F)  # Load enable + lower 7 bits
+    dut.uio_in.value = upper_byte                 # Upper 8 bits
     await RisingEdge(dut.clk)
     
-    # Load upper byte, keep load enable high
-    dut.uio_in.value = upper_byte
-    dut.ui_in.value = 0x80 | (lower_byte & 0x7F)
-    await RisingEdge(dut.clk)
-    
-    # Clear load enable to trigger execution
+    # Clear load enable
     dut.ui_in.value = 0x00
-    await RisingEdge(dut.clk)  # Execution happens here
+    dut.uio_in.value = 0x00
+    await RisingEdge(dut.clk)
     
-    # Wait for result to be available
-    await ClockCycles(dut.clk, 1)
+    # Wait for execution and output stability (3 cycles)
+    await ClockCycles(dut.clk, 3)
 
 @cocotb.test()
 async def test_add_then_stable(dut):
-    dut._log.info("Start")
+    dut._log.info("Start (ADD should happen first!)")
     clock = Clock(dut.clk, 10, units="us")
     cocotb.start_soon(clock.start())
 
-    # Reset and initialisation
+    # Reset and initialization
     dut.ena.value = 1
     dut.rst_n.value = 0
     dut.ui_in.value = 0
@@ -36,36 +34,44 @@ async def test_add_then_stable(dut):
     dut.rst_n.value = 1
     await ClockCycles(dut.clk, 2)
 
-    # Debug: Add some visibility into internal signals
-    dut._log.info(f"Initial state: uo_out={int(dut.uo_out.value)}, uio_out={int(dut.uio_out.value)}")
+    # Debug: Log initial state
+    dut._log.info(f"Initial state: uo_out={int(dut.uo_out.value)}, uio_out={int(dut.uio_out.value)}, uio_oe={int(dut.uio_oe.value)}")
 
     # --- Load LI r2, 5 ---
-    dut._log.info("Loading LI r2, 5")
+    dut._log.info("Loading LI r2, 5 (funct3=111, opcode=01)")
     await load_instruction(dut, lower_byte=0x09, upper_byte=0xE5)
     r2_val = int(dut.uo_out.value)
-    dut._log.info(f"After LI r2, 5: uo_out = {r2_val} (should be 5)")
+    dut._log.info(f"After LI r2, 5: uo_out={r2_val}, uio_out={int(dut.uio_out.value)}, uio_oe={int(dut.uio_oe.value)}")
+    assert r2_val == 5, f"LI to r2 failed! Expected 5, got {r2_val}"
 
     # --- Load LI r3, 7 ---
-    dut._log.info("Loading LI r3, 7")
+    dut._log.info("Loading LI r3, 7 (funct3=111, opcode=01)")
     await load_instruction(dut, lower_byte=0x0B, upper_byte=0xE7)
     r3_val = int(dut.uo_out.value)
-    dut._log.info(f"After LI r3, 7: uo_out = {r3_val} (should be 7)")
+    dut._log.info(f"After LI r3, 7: uo_out={r3_val}, uio_out={int(dut.uio_out.value)}, uio_oe={int(dut.uio_oe.value)}")
+    assert r3_val == 7, f"LI to r3 failed! Expected 7, got {r3_val}"
 
     # --- ADD r1 = r2 + r3 ---
-    dut._log.info("Loading ADD r1, r2, r3")
+    dut._log.info("Loading ADD r1, r2, r3 (funct3=000, opcode=00)")
     await load_instruction(dut, lower_byte=0x44, upper_byte=0x03)
     add_result = int(dut.uo_out.value)
-    dut._log.info(f"ADD result uo_out = {add_result} (should be 12)")
+    dut._log.info(f"ADD result: uo_out={add_result}, uio_out={int(dut.uio_out.value)}, uio_oe={int(dut.uio_oe.value)}")
 
-    # Check register values by loading them back (debug)
-    await load_instruction(dut, lower_byte=0x00, upper_byte=0xE0)  # LI r0, r2 value (dummy to see r2)
+    # Check register values by loading them back
+    # LI r0, r2 value (dummy to read r2)
+    await load_instruction(dut, lower_byte=0x00, upper_byte=0xE0)
     r2_check = int(dut.uo_out.value)
     dut._log.info(f"Register r2 contains: {r2_check}")
 
+    # LI r0, r3 value (dummy to read r3)
+    await load_instruction(dut, lower_byte=0x02, upper_byte=0xE1)
+    r3_check = int(dut.uo_out.value)
+    dut._log.info(f"Register r3 contains: {r3_check}")
+
     # Assert results
-    assert r2_val == 5, f"LI to r2 failed! uo_out = {r2_val}"
-    assert r3_val == 7, f"LI to r3 failed! uo_out = {r3_val}"
-    assert add_result == 12, f"ADD r1=r2+r3 failed! uo_out = {add_result} (r2={r2_check})"
+    assert r2_check == 5, f"Register r2 incorrect! Expected 5, got {r2_check}"
+    assert r3_check == 7, f"Register r3 incorrect! Expected 7, got {r3_check}"
+    assert add_result == 12, f"Expected 12 after add, got {add_result}"
 
     dut._log.info("✓ All tests passed!")
 
@@ -105,15 +111,15 @@ async def test_instruction_loading_protocol(dut):
     dut.ui_in.value = 0x85
     dut.uio_in.value = 0x00
     await ClockCycles(dut.clk, 1)
-    dut.ui_in.value = 0x05
+    dut.ui_in.value = 0x00
+    dut.uio_in.value = 0x00
     await ClockCycles(dut.clk, 2)
     partial_state = int(dut.uio_out.value)
     dut.ui_in.value = 0x80
     dut.uio_in.value = 0x00
-    await ClockCycles(dut.clk, 1)
-    dut.uio_in.value = 0x00
-    await ClockCycles(dut.clk, 1)
+    await RisingEdge(dut.clk)
     dut.ui_in.value = 0x00
+    dut.uio_in.value = 0x00
     await ClockCycles(dut.clk, 3)
     final_state = int(dut.uio_out.value)
     dut._log.info(f"States - Initial: {initial_state}, Partial: {partial_state}, Final: {final_state}")

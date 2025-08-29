@@ -28,6 +28,9 @@ module tt_um_pico_riscv (
     // Program counter - 8 bits for simplicity
     reg [7:0] pc;
     
+    // Load state for instruction loading protocol
+    reg load_state; // 0 = expecting lower byte, 1 = expecting upper byte
+    
     // Instruction decode
     wire [1:0] opcode = instruction_reg[1:0];
     wire [2:0] rd = instruction_reg[4:2];
@@ -46,96 +49,125 @@ module tt_um_pico_riscv (
     reg branch_taken;
     reg [2:0] current_rd;
     
-    // Input protocol: ui_in[7] = load_enable, ui_in[6:0] = data
-// First cycle loads lower 8 bits, second cycle loads upper 8 bits
-always @(posedge clk) begin
-    if (rst) begin
-        // Reset all registers and state
-        registers[0] <= 8'b0;
-        registers[1] <= 8'b0;
-        registers[2] <= 8'b0;
-        registers[3] <= 8'b0;
-        registers[4] <= 8'b0;
-        registers[5] <= 8'b0;
-        registers[6] <= 8'b0;
-        registers[7] <= 8'b0;
-        
-        instruction_reg <= 16'b0;
-        instruction_valid <= 1'b0;
-        load_state <= 1'b0;
-        pc <= 8'b0;
-        branch_taken <= 1'b0;
-        current_rd <= 3'b0;
-        
-    end else begin
-        // Instruction loading protocol
-        if (ui_in[7]) begin // Load enable
-            if (!load_state) begin
-                // Load lower 8 bits of instruction
-                instruction_reg[7:0] <= ui_in[6:0];
-                load_state <= 1'b1;
-                instruction_valid <= 1'b0;
-            end else begin
-                // Load upper 8 bits of instruction  
-                instruction_reg[15:8] <= uio_in[7:0];  // Use full uio_in
-                load_state <= 1'b0;
-                instruction_valid <= 1'b1;
-            end
-        end else if (instruction_valid) begin
-            // Execute instruction
-            instruction_valid <= 1'b0;
-            current_rd <= rd;
+    // ALU implementation
+    always @(*) begin
+        case (funct3)
+            3'b000: alu_result = operand_a + operand_b;      // ADD
+            3'b001: alu_result = operand_a - operand_b;      // SUB  
+            3'b010: alu_result = operand_a & operand_b;      // AND
+            3'b011: alu_result = operand_a | operand_b;      // OR
+            3'b100: alu_result = operand_a ^ operand_b;      // XOR
+            3'b101: alu_result = operand_a << operand_b[2:0]; // SLL
+            3'b110: alu_result = operand_a >> operand_b[2:0]; // SRL
+            3'b111: alu_result = (operand_a < operand_b) ? 8'b1 : 8'b0; // SLT
+            default: alu_result = 8'b0;
+        endcase
+    end
+    
+    // Main CPU logic
+    always @(posedge clk) begin
+        if (rst) begin
+            // Reset all registers and state
+            registers[0] <= 8'b0;
+            registers[1] <= 8'b0;
+            registers[2] <= 8'b0;
+            registers[3] <= 8'b0;
+            registers[4] <= 8'b0;
+            registers[5] <= 8'b0;
+            registers[6] <= 8'b0;
+            registers[7] <= 8'b0;
             
-            case (opcode)
-                2'b00: begin // R-type
-                    if (rd != 3'b0) // Don't write to register 0
-                        registers[rd] <= alu_result;
-                    branch_taken <= 1'b0;
-                    pc <= pc + 1'b1;
+            instruction_reg <= 16'b0;
+            instruction_valid <= 1'b0;
+            load_state <= 1'b0;
+            pc <= 8'b0;
+            branch_taken <= 1'b0;
+            current_rd <= 3'b0;
+            
+        end else begin
+            // Instruction loading protocol
+            if (ui_in[7]) begin // Load enable
+                if (!load_state) begin
+                    // Load lower 8 bits of instruction
+                    instruction_reg[7:0] <= {ui_in[6], ui_in[5:0], 1'b0}; // Pad to 8 bits
+                    load_state <= 1'b1;
+                    instruction_valid <= 1'b0;
+                end else begin
+                    // Load upper 8 bits of instruction  
+                    instruction_reg[15:8] <= uio_in[7:0];  // Use full uio_in
+                    load_state <= 1'b0;
+                    instruction_valid <= 1'b1;
                 end
+            end else if (instruction_valid) begin
+                // Execute instruction
+                instruction_valid <= 1'b0;
+                current_rd <= rd;
                 
-                2'b01: begin // I-type  
-                    case (funct3)
-                        3'b000: begin // ADDI
-                            if (rd != 3'b0)
-                                registers[rd] <= operand_a + imm_extended;
-                        end
-                        default: begin // LI (Load Immediate)
-                            if (rd != 3'b0)
-                                registers[rd] <= imm_extended;
-                        end
-                    endcase
-                    branch_taken <= 1'b0;
-                    pc <= pc + 1'b1;
-                end
-                
-                2'b10: begin // S-type (Store)
-                    branch_taken <= 1'b0;
-                    pc <= pc + 1'b1;
-                end
-                
-                2'b11: begin // B-type (Branch)
-                    case (funct3[1:0])
-                        2'b00: branch_taken <= (operand_a == operand_b);
-                        2'b01: branch_taken <= (operand_a != operand_b);
-                        2'b10: branch_taken <= (operand_a < operand_b);
-                        2'b11: branch_taken <= (operand_a >= operand_b);
-                    endcase
-                    
-                    if (branch_taken) begin
-                        pc <= pc + imm_extended;
-                    end else begin
+                case (opcode)
+                    2'b00: begin // R-type
+                        if (rd != 3'b0) // Don't write to register 0
+                            registers[rd] <= alu_result;
+                        branch_taken <= 1'b0;
                         pc <= pc + 1'b1;
                     end
-                end
-            endcase
+                    
+                    2'b01: begin // I-type  
+                        case (funct3)
+                            3'b000: begin // ADDI
+                                if (rd != 3'b0)
+                                    registers[rd] <= operand_a + imm_extended;
+                            end
+                            3'b010: begin // SLTI  
+                                if (rd != 3'b0)
+                                    registers[rd] <= (operand_a < imm_extended) ? 8'b1 : 8'b0;
+                            end
+                            3'b011: begin // ANDI
+                                if (rd != 3'b0)
+                                    registers[rd] <= operand_a & imm_extended;
+                            end
+                            3'b100: begin // ORI
+                                if (rd != 3'b0)
+                                    registers[rd] <= operand_a | imm_extended;
+                            end
+                            default: begin // LI (Load Immediate)
+                                if (rd != 3'b0)
+                                    registers[rd] <= imm_extended;
+                            end
+                        endcase
+                        branch_taken <= 1'b0;
+                        pc <= pc + 1'b1;
+                    end
+                    
+                    2'b10: begin // S-type (Store)
+                        branch_taken <= 1'b0;
+                        pc <= pc + 1'b1;
+                    end
+                    
+                    2'b11: begin // B-type (Branch)
+                        case (funct3[1:0])
+                            2'b00: branch_taken <= (operand_a == operand_b);
+                            2'b01: branch_taken <= (operand_a != operand_b);
+                            2'b10: branch_taken <= (operand_a < operand_b);
+                            2'b11: branch_taken <= (operand_a >= operand_b);
+                        endcase
+                        
+                        if (branch_taken) begin
+                            pc <= pc + imm_extended;
+                        end else begin
+                            pc <= pc + 1'b1;
+                        end
+                    end
+                    default: begin
+                        branch_taken <= 1'b0;
+                        pc <= pc + 1'b1;
+                    end
+                endcase
+            end
         end
     end
-end
-
     
     // Output assignments
-    assign uo_out = (opcode == 2'b10) ? registers[rs2] : registers[current_rd]; // Output register value for store or current result
+    assign uo_out = (opcode == 2'b10) ? registers[rs2] : registers[current_rd];
     assign uio_out = {pc[4:0], current_rd}; // Debug: show PC and current register
     assign uio_oe = 8'b11111111; // All uio pins as outputs for debugging
     

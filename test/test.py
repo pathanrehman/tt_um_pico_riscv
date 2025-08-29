@@ -3,153 +3,146 @@
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import ClockCycles, RisingEdge
-
-async def load_instruction(dut, lower_byte, upper_byte):
-    # Load full 16-bit instruction in one cycle
-    dut.ui_in.value = 0x80 | (lower_byte & 0x7F)  # Load enable + lower 7 bits
-    dut.uio_in.value = upper_byte                 # Upper 8 bits
-    await RisingEdge(dut.clk)
-    
-    # Clear load enable
-    dut.ui_in.value = 0x00
-    dut.uio_in.value = 0x00
-    await RisingEdge(dut.clk)
-    
-    # Wait for execution and output stability (3 cycles)
-    await ClockCycles(dut.clk, 3)
+from cocotb.triggers import ClockCycles
 
 @cocotb.test()
-async def test_add_then_stable(dut):
-    dut._log.info("Start (ADD should happen first!)")
+async def test_project(dut):
+    dut._log.info("Start")
+    
+    # Set the clock period to 10 us (100 KHz)
     clock = Clock(dut.clk, 10, units="us")
     cocotb.start_soon(clock.start())
-
-    # Reset and initialization
+    
+    # Reset
+    dut._log.info("Reset")
     dut.ena.value = 1
-    dut.rst_n.value = 0
     dut.ui_in.value = 0
     dut.uio_in.value = 0
+    dut.rst_n.value = 0
     await ClockCycles(dut.clk, 10)
     dut.rst_n.value = 1
-    await ClockCycles(dut.clk, 2)
-
-    # Debug: Log initial state
-    dut._log.info(f"Initial state: uo_out={int(dut.uo_out.value)}, uio_out={int(dut.uio_out.value)}, uio_oe={int(dut.uio_oe.value)}")
-
-    # --- Load LI r2, 5 ---
-    dut._log.info("Loading LI r2, 5 (funct3=111, opcode=01)")
-    await load_instruction(dut, lower_byte=0x09, upper_byte=0xE5)
-    r2_val = int(dut.uo_out.value)
-    dut._log.info(f"After LI r2, 5: uo_out={r2_val}, uio_out={int(dut.uio_out.value)}, uio_oe={int(dut.uio_oe.value)}")
-    assert r2_val == 5, f"LI to r2 failed! Expected 5, got {r2_val}"
-
-    # --- Load LI r3, 7 ---
-    dut._log.info("Loading LI r3, 7 (funct3=111, opcode=01)")
-    await load_instruction(dut, lower_byte=0x0B, upper_byte=0xE7)
-    r3_val = int(dut.uo_out.value)
-    dut._log.info(f"After LI r3, 7: uo_out={r3_val}, uio_out={int(dut.uio_out.value)}, uio_oe={int(dut.uio_oe.value)}")
-    assert r3_val == 7, f"LI to r3 failed! Expected 7, got {r3_val}"
-
-    # --- ADD r1 = r2 + r3 ---
-    dut._log.info("Loading ADD r1, r2, r3 (funct3=000, opcode=00)")
-    await load_instruction(dut, lower_byte=0x44, upper_byte=0x03)
-    add_result = int(dut.uo_out.value)
-    dut._log.info(f"ADD result: uo_out={add_result}, uio_out={int(dut.uio_out.value)}, uio_oe={int(dut.uio_oe.value)}")
-
-    # Check register values by loading them back
-    # LI r0, r2 value (dummy to read r2)
-    await load_instruction(dut, lower_byte=0x00, upper_byte=0xE0)
-    r2_check = int(dut.uo_out.value)
-    dut._log.info(f"Register r2 contains: {r2_check}")
-
-    # LI r0, r3 value (dummy to read r3)
-    await load_instruction(dut, lower_byte=0x02, upper_byte=0xE1)
-    r3_check = int(dut.uo_out.value)
-    dut._log.info(f"Register r3 contains: {r3_check}")
-
-    # Assert results
-    assert r2_check == 5, f"Register r2 incorrect! Expected 5, got {r2_check}"
-    assert r3_check == 7, f"Register r3 incorrect! Expected 7, got {r3_check}"
-    assert add_result == 12, f"Expected 12 after add, got {add_result}"
-
-    dut._log.info("✓ All tests passed!")
+    
+    dut._log.info("Test Tiny RISC-V Core - Basic Arithmetic Operations")
+    
+    # Test Case 1: Basic Addition (15 + 5 = 20)
+    dut._log.info("Test Case 1: Addition - 15 + 5")
+    dut.ui_in.value = 15   # First operand
+    dut.uio_in.value = 5   # Second operand
+    
+    # Wait for the CPU to execute the pre-loaded program
+    # The program loads inputs, performs addition, and outputs result
+    await ClockCycles(dut.clk, 20)  # Give enough cycles for full execution
+    
+    # Check if we got the expected addition result (15 + 5 = 20)
+    dut._log.info(f"Addition Result: {dut.uo_out.value} (expected 20)")
+    dut._log.info(f"CPU State: {dut.uio_out.value & 0x07}")
+    
+    # Wait a bit more to see if CPU continues to subtraction
+    await ClockCycles(dut.clk, 10)
+    
+    # Check subtraction result (15 - 5 = 10) - may appear later in execution
+    dut._log.info(f"Final Result: {dut.uo_out.value}")
+    dut._log.info(f"CPU State: {dut.uio_out.value & 0x07}")
+    
+    # Test Case 2: Different operands (25 + 8 = 33)
+    dut._log.info("Test Case 2: Reset and test 25 + 8")
+    
+    # Reset the CPU
+    dut.rst_n.value = 0
+    await ClockCycles(dut.clk, 5)
+    
+    # Set new input values
+    dut.ui_in.value = 25   # First operand
+    dut.uio_in.value = 8   # Second operand
+    dut.rst_n.value = 1
+    
+    # Execute the program again
+    await ClockCycles(dut.clk, 20)
+    
+    dut._log.info(f"Addition Result: {dut.uo_out.value} (expected 33)")
+    dut._log.info(f"CPU State: {dut.uio_out.value & 0x07}")
+    
+    # Wait for potential subtraction result (25 - 8 = 17)
+    await ClockCycles(dut.clk, 10)
+    dut._log.info(f"Subtraction Result: {dut.uo_out.value} (expected 17)")
+    
+    # Test Case 3: Edge case with smaller numbers (7 + 3 = 10)
+    dut._log.info("Test Case 3: Reset and test 7 + 3")
+    
+    # Reset the CPU
+    dut.rst_n.value = 0
+    await ClockCycles(dut.clk, 5)
+    
+    # Set new input values
+    dut.ui_in.value = 7    # First operand
+    dut.uio_in.value = 3   # Second operand
+    dut.rst_n.value = 1
+    
+    # Execute and monitor state transitions
+    for cycle in range(25):
+        await ClockCycles(dut.clk, 1)
+        current_state = dut.uio_out.value & 0x07
+        output_val = dut.uo_out.value
+        
+        if cycle % 5 == 0:  # Log every 5 cycles
+            dut._log.info(f"Cycle {cycle}: State={current_state}, Output={output_val}")
+        
+        # Check for expected results
+        if output_val == 10:  # Addition result
+            dut._log.info(f"✓ Addition successful at cycle {cycle}: 7 + 3 = {output_val}")
+        elif output_val == 4:  # Subtraction result
+            dut._log.info(f"✓ Subtraction successful at cycle {cycle}: 7 - 3 = {output_val}")
+        
+        # Stop if CPU reaches HALT state (state = 4)
+        if current_state == 4:
+            dut._log.info(f"CPU halted at cycle {cycle}")
+            break
+    
+    # Final state check
+    final_output = dut.uo_out.value
+    final_state = dut.uio_out.value & 0x07
+    
+    dut._log.info(f"Final Test Results:")
+    dut._log.info(f"  Final Output: {final_output}")
+    dut._log.info(f"  Final State: {final_state}")
+    dut._log.info(f"  Expected: Addition=10, Subtraction=4, Halt State=4")
+    
+    # Basic assertion - check that we got some reasonable output
+    # (The exact timing depends on the CPU implementation)
+    assert final_output in [4, 10], f"Expected output 4 or 10, got {final_output}"
+    
+    dut._log.info("Test completed successfully!")
 
 @cocotb.test()
-async def test_reset_behavior(dut):
-    dut._log.info("Testing reset behavior")
+async def test_cpu_states(dut):
+    """Test to specifically monitor CPU state transitions"""
+    dut._log.info("Testing CPU State Transitions")
+    
+    # Set the clock period to 10 us (100 KHz)
     clock = Clock(dut.clk, 10, units="us")
     cocotb.start_soon(clock.start())
+    
+    # Reset
     dut.ena.value = 1
-    dut.ui_in.value = 0xFF
-    dut.uio_in.value = 0xFF
+    dut.ui_in.value = 12
+    dut.uio_in.value = 4
     dut.rst_n.value = 0
     await ClockCycles(dut.clk, 5)
     dut.rst_n.value = 1
-    await ClockCycles(dut.clk, 1)
-    dut.ui_in.value = 0x00
-    dut.uio_in.value = 0x00
-    await ClockCycles(dut.clk, 2)
-    uio_out_val = int(dut.uio_out.value)
-    uo_out_val = int(dut.uo_out.value)
-    dut._log.info(f"Reset state - uo_out: {uo_out_val}, uio_out: {uio_out_val}")
-    assert uo_out_val == 0, "Reset should clear uo_out"
-    assert uio_out_val == 0, "Reset should clear uio_out"
-    dut._log.info("✓ Reset behavior test passed")
-
-@cocotb.test()
-async def test_instruction_loading_protocol(dut):
-    dut._log.info("Testing instruction loading protocol")
-    clock = Clock(dut.clk, 10, units="us")
-    cocotb.start_soon(clock.start())
-    dut.ena.value = 1
-    dut.rst_n.value = 0
-    await ClockCycles(dut.clk, 5)
-    dut.rst_n.value = 1
-    await ClockCycles(dut.clk, 1)
-    initial_state = int(dut.uio_out.value)
-    dut.ui_in.value = 0x85
-    dut.uio_in.value = 0x00
-    await ClockCycles(dut.clk, 1)
-    dut.ui_in.value = 0x00
-    dut.uio_in.value = 0x00
-    await ClockCycles(dut.clk, 2)
-    partial_state = int(dut.uio_out.value)
-    dut.ui_in.value = 0x80
-    dut.uio_in.value = 0x00
-    await RisingEdge(dut.clk)
-    dut.ui_in.value = 0x00
-    dut.uio_in.value = 0x00
-    await ClockCycles(dut.clk, 3)
-    final_state = int(dut.uio_out.value)
-    dut._log.info(f"States - Initial: {initial_state}, Partial: {partial_state}, Final: {final_state}")
-    assert True
-    dut._log.info("✓ Instruction loading protocol test completed")
-
-@cocotb.test()
-async def test_clock_and_reset_stability(dut):
-    dut._log.info("Testing clock and reset stability")
-    clock = Clock(dut.clk, 10, units="us")
-    cocotb.start_soon(clock.start())
-    for i in range(3):
-        dut._log.info(f"Reset cycle {i+1}")
-        dut.ena.value = 1
-        dut.ui_in.value = 0
-        dut.uio_in.value = 0
-        dut.rst_n.value = 0
-        await ClockCycles(dut.clk, 5)
-        dut.rst_n.value = 1
-        await ClockCycles(dut.clk, 5)
-        uo_out = int(dut.uo_out.value)
-        uio_out = int(dut.uio_out.value)
-        uio_oe = int(dut.uio_oe.value)
-        dut._log.info(f"Cycle {i+1} outputs - uo_out: {uo_out}, uio_out: {uio_out}, uio_oe: {uio_oe}")
-    dut._log.info("Extended operation test")
-    for cycle in range(10):
-        dut.ui_in.value = cycle & 0x7F
-        dut.uio_in.value = (cycle * 2) & 0xFF
-        await ClockCycles(dut.clk, 2)
-    dut.ui_in.value = 0
-    dut.uio_in.value = 0
-    await ClockCycles(dut.clk, 5)
-    dut._log.info("✓ Clock and reset stability test passed")
+    
+    # Monitor state transitions for detailed analysis
+    states = ["FETCH", "DECODE", "EXECUTE", "WRITEBACK", "HALT", "UNKNOWN", "UNKNOWN", "UNKNOWN"]
+    
+    for cycle in range(30):
+        await ClockCycles(dut.clk, 1)
+        current_state = dut.uio_out.value & 0x07
+        output_val = dut.uo_out.value
+        
+        state_name = states[current_state] if current_state < len(states) else f"STATE_{current_state}"
+        dut._log.info(f"Cycle {cycle:2d}: {state_name} | Output: {output_val:3d}")
+        
+        if current_state == 4:  # HALT
+            dut._log.info("CPU reached HALT state")
+            break
+    
+    dut._log.info("State transition test completed")

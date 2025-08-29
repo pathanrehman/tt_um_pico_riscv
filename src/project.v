@@ -19,7 +19,7 @@ async def load_instruction(dut, lower_byte, upper_byte):
     dut.ui_in.value = 0x00
     await RisingEdge(dut.clk)  # Execution happens here
     
-    # Wait for result to be stable (increased to 3 cycles)
+    # Wait for result to be stable (3 cycles to ensure register and output update)
     await ClockCycles(dut.clk, 3)
 
 @cocotb.test()

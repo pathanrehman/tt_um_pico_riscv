@@ -28,16 +28,16 @@ async def test_add_then_stable(dut):
     dut.rst_n.value = 1
     await ClockCycles(dut.clk, 2)
 
-    # --- Try to load LI r2, 5 ---
-    dut._log.info("Loading LI r2, 5 (funct3=111, correct for LI)")
-    await load_instruction(dut, lower_byte=0x11, upper_byte=0xE5)
+    # --- Load LI r2, 5 ---
+    dut._log.info("Loading LI r2, 5")
+    await load_instruction(dut, lower_byte=0x09, upper_byte=0xE5)  # Fixed encoding
     await ClockCycles(dut.clk, 2)
     r2_val = int(dut.uo_out.value)
     dut._log.info(f"After LI r2, 5: uo_out (r2) = {r2_val}")  # Should be 5
 
-    # --- Try to load LI r3, 7 ---
-    dut._log.info("Loading LI r3, 7 (funct3=111, correct for LI)")
-    await load_instruction(dut, lower_byte=0x19, upper_byte=0xE7)
+    # --- Load LI r3, 7 ---
+    dut._log.info("Loading LI r3, 7")
+    await load_instruction(dut, lower_byte=0x0B, upper_byte=0xE7)  # Fixed encoding
     await ClockCycles(dut.clk, 2)
     r3_val = int(dut.uo_out.value)
     dut._log.info(f"After LI r3, 7: uo_out (r3) = {r3_val}")  # Should be 7
@@ -49,12 +49,12 @@ async def test_add_then_stable(dut):
     add_result = int(dut.uo_out.value)
     dut._log.info(f"ADD result uo_out (r1 = r2 + r3) = {add_result}")
 
-    # Now assert EACH step so you see exactly which one fails
+    # Assert EACH step
     assert r2_val == 5, f"LI to r2 failed! uo_out = {r2_val}"
     assert r3_val == 7, f"LI to r3 failed! uo_out = {r3_val}"
     assert add_result == 12, f"ADD r1=r2+r3 failed! uo_out = {add_result}"
 
-    dut._log.info("Stability and output checks follow")
+    dut._log.info("✓ All tests passed!")
     assert True
 
 @cocotb.test()

@@ -79,7 +79,7 @@ module tt_um_tiny_riscv (
             end else begin
                 case (state)
                     FETCH: begin
-                        if (pc < 16) begin
+                        if (pc < 4'd16) begin   // WIDTH MATCH FIX!
                             instruction <= inst_mem[pc];
                             state <= DECODE;
                         end else begin

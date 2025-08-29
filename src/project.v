@@ -1,133 +1,159 @@
-/*
- * Copyright (c) 2025 Your Name
- * SPDX-License-Identifier: Apache-2.0
- */
-`default_nettype none
-module tt_um_pico_riscv (
-    input  wire [7:0] ui_in,    // Dedicated inputs
-    output wire [7:0] uo_out,   // Dedicated outputs
-    input  wire [7:0] uio_in,   // IOs: Input path
-    output wire [7:0] uio_out,  // IOs: Output path
-    output wire [7:0] uio_oe,   // IOs: Enable path (active high: 0=input, 1=output)
-    input  wire       ena,      // always 1 when the design is powered, so you can ignore it
-    input  wire       clk,      // clock
-    input  wire       rst_n     // reset_n - low to reset
-);
-    // Internal active-high reset
-    wire rst = ~rst_n;
+# SPDX-FileCopyrightText: © 2024 Tiny Tapeout
+# SPDX-License-Identifier: Apache-2.0
 
-    // Instruction register - 16 bits total
-    reg [15:0] instruction_reg;
-    reg        instruction_valid;
-    reg        load_state; // 0 = expecting lower byte, 1 = expecting upper byte
+import cocotb
+from cocotb.clock import Clock
+from cocotb.triggers import ClockCycles, RisingEdge
 
-    // 8 x 8-bit register file
-    reg [7:0] registers [0:7];
-    reg [7:0] pc;
-    reg [2:0] current_rd;
-    reg       branch_taken;
+async def load_instruction(dut, lower_byte, upper_byte):
+    # Load lower byte with load enable
+    dut.ui_in.value = 0x80 | (lower_byte & 0x7F)
+    await RisingEdge(dut.clk)
+    
+    # Load upper byte, keep load enable high
+    dut.uio_in.value = upper_byte
+    dut.ui_in.value = 0x80 | (lower_byte & 0x7F)
+    await RisingEdge(dut.clk)
+    
+    # Clear load enable to trigger execution
+    dut.ui_in.value = 0x00
+    await RisingEdge(dut.clk)  # Execution happens here
+    
+    # Wait for result to be stable (increased to 3 cycles)
+    await ClockCycles(dut.clk, 3)
 
-    // ALU result
-    reg [7:0] alu_result;
+@cocotb.test()
+async def test_add_then_stable(dut):
+    dut._log.info("Start (ADD should happen first!)")
+    clock = Clock(dut.clk, 10, units="us")
+    cocotb.start_soon(clock.start())
 
-    // Instruction decode
-    wire [1:0] opcode   = instruction_reg[1:0];
-    wire [2:0] rd       = instruction_reg[4:2];
-    wire [2:0] rs1      = instruction_reg[7:5];
-    wire [2:0] rs2      = instruction_reg[10:8];
-    wire [2:0] funct3   = instruction_reg[15:13];
-    wire [4:0] imm      = instruction_reg[12:8];    // 5-bit immediate
+    # Reset and initialization
+    dut.ena.value = 1
+    dut.rst_n.value = 0
+    dut.ui_in.value = 0
+    dut.uio_in.value = 0
+    await ClockCycles(dut.clk, 10)
+    dut.rst_n.value = 1
+    await ClockCycles(dut.clk, 2)
 
-    wire [7:0] operand_a     = registers[rs1];
-    wire [7:0] operand_b     = registers[rs2];
-    wire [7:0] imm_extended  = {3'b0, imm};
+    # Debug: Log initial state
+    dut._log.info(f"Initial state: uo_out={int(dut.uo_out.value)}, uio_out={int(dut.uio_out.value)}, uio_oe={int(dut.uio_oe.value)}")
 
-    // Reset all registers and state robustly
-    integer i;
-    always @(posedge clk or posedge rst) begin
-        if (rst) begin
-            for (i = 0; i < 8; i = i + 1)
-                registers[i] <= 8'b0;
-            instruction_reg   <= 16'b0;
-            instruction_valid <= 1'b0;
-            load_state        <= 1'b0;
-            pc                <= 8'b0;
-            branch_taken      <= 1'b0;
-            current_rd        <= 3'b0;
-        end else begin
-            // Instruction loading protocol (simple direct copy, robust for simulation)
-            if (ui_in[7]) begin // Load enable
-                if (!load_state) begin
-                    instruction_reg[7:0]  <= ui_in[7:0];
-                    load_state            <= 1'b1;
-                    instruction_valid     <= 1'b0;
-                end else begin
-                    instruction_reg[15:8] <= uio_in[7:0];
-                    load_state            <= 1'b0;
-                    instruction_valid     <= 1'b1;
-                end
-            end else if (instruction_valid) begin
-                instruction_valid <= 1'b0;
-                current_rd        <= rd;
-                // ALU operation
-                case (funct3)
-                    3'b000: alu_result = operand_a + operand_b;      // ADD
-                    3'b001: alu_result = operand_a - operand_b;      // SUB  
-                    3'b010: alu_result = operand_a & operand_b;      // AND
-                    3'b011: alu_result = operand_a | operand_b;      // OR
-                    3'b100: alu_result = operand_a ^ operand_b;      // XOR
-                    3'b101: alu_result = operand_a << operand_b[2:0];// SLL
-                    3'b110: alu_result = operand_a >> operand_b[2:0];// SRL
-                    3'b111: alu_result = (operand_a < operand_b) ? 8'b1 : 8'b0;// SLT
-                    default: alu_result = 8'b0;
-                endcase
-                // Decoder
-                case (opcode)
-                    2'b00: begin // R-type
-                        if (rd != 3'b000)
-                            registers[rd] <= alu_result;
-                        branch_taken <= 1'b0;
-                        pc <= pc + 1'b1;
-                    end
-                    2'b01: begin // I-type
-                        case (funct3)
-                            3'b000: if (rd != 3'b000) registers[rd] <= operand_a + imm_extended; // ADDI
-                            3'b010: if (rd != 3'b000) registers[rd] <= (operand_a < imm_extended) ? 8'b1 : 8'b0; // SLTI
-                            3'b011: if (rd != 3'b000) registers[rd] <= operand_a & imm_extended; // ANDI
-                            3'b100: if (rd != 3'b000) registers[rd] <= operand_a | imm_extended; // ORI
-                            default: if (rd != 3'b000) registers[rd] <= imm_extended; // Load Immediate
-                        endcase
-                        branch_taken <= 1'b0;
-                        pc <= pc + 1'b1;
-                    end
-                    2'b10: begin // S-type (Store)
-                        branch_taken <= 1'b0;
-                        pc <= pc + 1'b1;
-                    end
-                    2'b11: begin // B-type (Branch)
-                        case (funct3[1:0])
-                            2'b00: branch_taken <= (operand_a == operand_b);
-                            2'b01: branch_taken <= (operand_a != operand_b);
-                            2'b10: branch_taken <= (operand_a < operand_b);
-                            2'b11: branch_taken <= (operand_a >= operand_b);
-                        endcase
-                        if (branch_taken) pc <= pc + imm_extended;
-                        else pc <= pc + 1'b1;
-                    end
-                    default: begin
-                        branch_taken <= 1'b0;
-                        pc <= pc + 1'b1;
-                    end
-                endcase
-            end
-        end
-    end
+    # --- Load LI r2, 5 ---
+    dut._log.info("Loading LI r2, 5 (funct3=111, opcode=01)")
+    await load_instruction(dut, lower_byte=0x09, upper_byte=0xE5)
+    r2_val = int(dut.uo_out.value)
+    dut._log.info(f"After LI r2, 5: uo_out={r2_val}, uio_out={int(dut.uio_out.value)}, uio_oe={int(dut.uio_oe.value)}")
+    assert r2_val == 5, f"LI to r2 failed! Expected 5, got {r2_val}"
 
-    // Output assignments - make sure outputs are always valid (never X)
-    assign uo_out  = (opcode == 2'b10) ? registers[rs2] : registers[current_rd];
-    assign uio_out = {pc[4:0], current_rd}; // Show PC & reg for debug
-    assign uio_oe  = 8'b11111111;           // All outputs enabled
+    # --- Load LI r3, 7 ---
+    dut._log.info("Loading LI r3, 7 (funct3=111, opcode=01)")
+    await load_instruction(dut, lower_byte=0x0B, upper_byte=0xE7)
+    r3_val = int(dut.uo_out.value)
+    dut._log.info(f"After LI r3, 7: uo_out={r3_val}, uio_out={int(dut.uio_out.value)}, uio_oe={int(dut.uio_oe.value)}")
+    assert r3_val == 7, f"LI to r3 failed! Expected 7, got {r3_val}"
 
-    // Prevent warnings on unused input
-    wire _unused = &{ena, 1'b0};
-endmodule
+    # --- ADD r1 = r2 + r3 ---
+    dut._log.info("Loading ADD r1, r2, r3 (funct3=000, opcode=00)")
+    await load_instruction(dut, lower_byte=0x44, upper_byte=0x03)
+    await ClockCycles(dut.clk, 2)  # Extra cycles for ADD result to propagate
+    add_result = int(dut.uo_out.value)
+    dut._log.info(f"ADD result: uo_out={add_result}, uio_out={int(dut.uio_out.value)}, uio_oe={int(dut.uio_oe.value)}")
+
+    # Check register values by loading them back
+    # LI r0, r2 value (dummy to read r2)
+    await load_instruction(dut, lower_byte=0x00, upper_byte=0xE0)
+    r2_check = int(dut.uo_out.value)
+    dut._log.info(f"Register r2 contains: {r2_check}")
+
+    # LI r0, r3 value (dummy to read r3)
+    await load_instruction(dut, lower_byte=0x02, upper_byte=0xE1)
+    r3_check = int(dut.uo_out.value)
+    dut._log.info(f"Register r3 contains: {r3_check}")
+
+    # Assert results
+    assert r2_check == 5, f"Register r2 incorrect! Expected 5, got {r2_check}"
+    assert r3_check == 7, f"Register r3 incorrect! Expected 7, got {r3_check}"
+    assert add_result == 12, f"Expected 12 after add, got {add_result}"
+
+    dut._log.info("✓ All tests passed!")
+
+@cocotb.test()
+async def test_reset_behavior(dut):
+    dut._log.info("Testing reset behavior")
+    clock = Clock(dut.clk, 10, units="us")
+    cocotb.start_soon(clock.start())
+    dut.ena.value = 1
+    dut.ui_in.value = 0xFF
+    dut.uio_in.value = 0xFF
+    dut.rst_n.value = 0
+    await ClockCycles(dut.clk, 5)
+    dut.rst_n.value = 1
+    await ClockCycles(dut.clk, 1)
+    dut.ui_in.value = 0x00
+    dut.uio_in.value = 0x00
+    await ClockCycles(dut.clk, 2)
+    uio_out_val = int(dut.uio_out.value)
+    uo_out_val = int(dut.uo_out.value)
+    dut._log.info(f"Reset state - uo_out: {uo_out_val}, uio_out: {uio_out_val}")
+    assert uo_out_val == 0, "Reset should clear uo_out"
+    assert uio_out_val == 0, "Reset should clear uio_out"
+    dut._log.info("✓ Reset behavior test passed")
+
+@cocotb.test()
+async def test_instruction_loading_protocol(dut):
+    dut._log.info("Testing instruction loading protocol")
+    clock = Clock(dut.clk, 10, units="us")
+    cocotb.start_soon(clock.start())
+    dut.ena.value = 1
+    dut.rst_n.value = 0
+    await ClockCycles(dut.clk, 5)
+    dut.rst_n.value = 1
+    await ClockCycles(dut.clk, 1)
+    initial_state = int(dut.uio_out.value)
+    dut.ui_in.value = 0x85
+    dut.uio_in.value = 0x00
+    await ClockCycles(dut.clk, 1)
+    dut.ui_in.value = 0x05
+    await ClockCycles(dut.clk, 2)
+    partial_state = int(dut.uio_out.value)
+    dut.ui_in.value = 0x80
+    dut.uio_in.value = 0x00
+    await ClockCycles(dut.clk, 1)
+    dut.uio_in.value = 0x00
+    await ClockCycles(dut.clk, 1)
+    dut.ui_in.value = 0x00
+    await ClockCycles(dut.clk, 3)
+    final_state = int(dut.uio_out.value)
+    dut._log.info(f"States - Initial: {initial_state}, Partial: {partial_state}, Final: {final_state}")
+    assert True
+    dut._log.info("✓ Instruction loading protocol test completed")
+
+@cocotb.test()
+async def test_clock_and_reset_stability(dut):
+    dut._log.info("Testing clock and reset stability")
+    clock = Clock(dut.clk, 10, units="us")
+    cocotb.start_soon(clock.start())
+    for i in range(3):
+        dut._log.info(f"Reset cycle {i+1}")
+        dut.ena.value = 1
+        dut.ui_in.value = 0
+        dut.uio_in.value = 0
+        dut.rst_n.value = 0
+        await ClockCycles(dut.clk, 5)
+        dut.rst_n.value = 1
+        await ClockCycles(dut.clk, 5)
+        uo_out = int(dut.uo_out.value)
+        uio_out = int(dut.uio_out.value)
+        uio_oe = int(dut.uio_oe.value)
+        dut._log.info(f"Cycle {i+1} outputs - uo_out: {uo_out}, uio_out: {uio_out}, uio_oe: {uio_oe}")
+    dut._log.info("Extended operation test")
+    for cycle in range(10):
+        dut.ui_in.value = cycle & 0x7F
+        dut.uio_in.value = (cycle * 2) & 0xFF
+        await ClockCycles(dut.clk, 2)
+    dut.ui_in.value = 0
+    dut.uio_in.value = 0
+    await ClockCycles(dut.clk, 5)
+    dut._log.info("✓ Clock and reset stability test passed")

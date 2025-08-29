@@ -45,9 +45,9 @@ MODULE = test
 # Enable waveform generation for debugging PicoRISC-V
 WAVES ?= 1
 
-# Set simulation timeout for educational testing
-COCOTB_SIM_TIME = 10ms
-COCOTB_TIME_PRECISION = 1ns
+# Set longer timeout for educational testing
+COCOTB_SIM_TIME = 1ms
+COCOTB_TIME_PRECISION = 1us
 
 # include cocotb's make rules to take care of the simulator setup
 include $(shell cocotb-config --makefiles)/Makefile.sim
